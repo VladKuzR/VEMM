@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime
 import requests
+from geopy.geocoders import Nominatim
 
 # Load environment variables
 load_dotenv()
@@ -161,6 +162,18 @@ def format_risk_context(disasters, risk_data):
             context += f"Error parsing risk data: {str(e)}\n"
     
     return context
+
+def get_coordinates(location):
+    """Convert location string to coordinates using Nominatim"""
+    try:
+        geolocator = Nominatim(user_agent="renewable_energy_consultant")
+        location_data = geolocator.geocode(location)
+        if location_data:
+            return location_data.latitude, location_data.longitude
+        return None, None
+    except Exception as e:
+        print(f"Error getting coordinates: {str(e)}")
+        return None, None
 
 # Generate analysis button
 if st.button("Generate Analysis"):
