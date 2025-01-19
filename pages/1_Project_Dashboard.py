@@ -9,6 +9,9 @@ from Home import stream_llm_response
 import sys
 from VAMM_governanceagent.create_agent import GovernanceAgent
 from VAMM_socialagent_master.create_agent import SocialMarketingAgent
+from VAMM_governanceagent.Expert_Agent import pydantic_ai_expert, PydanticAIDeps
+from openai import AsyncOpenAI
+from supabase import create_client, Client
 
 # Add the parent directory to the Python path
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,6 +30,16 @@ if not api_key:
     st.stop()
 
 openai.api_key = api_key
+
+# Initialize Supabase client
+supabase_url = os.getenv('SUPABASE_URL')
+supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+
+if not supabase_url or not supabase_key:
+    st.error("Supabase credentials not found. Please check your .env file.")
+    st.stop()
+
+supabase_client = create_client(supabase_url, supabase_key)
 
 # Set page config
 st.set_page_config(
@@ -269,6 +282,49 @@ def stream_llm_response(response):
     placeholder.markdown(full_response)
     return full_response
 
+# Update the async helper functions
+async def get_expert_response(prompt, deps):
+    response = await pydantic_ai_expert.run(
+        prompt,
+        deps=deps
+    )
+    # Extract the data field from the response which contains the formatted text
+    return response.data if hasattr(response, 'data') else str(response)
+
+def run_async_response(prompt, deps):
+    import asyncio
+    return asyncio.run(get_expert_response(prompt, deps))
+
+async def handle_project_chat():
+    # Initialize OpenAI client
+    openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    
+    # Initialize dependencies
+    deps = PydanticAIDeps(
+        supabase=supabase_client,
+        openai_client=openai_client
+    )
+    
+    if "project_messages" not in st.session_state:
+        st.session_state.project_messages = []
+
+    for message in st.session_state.project_messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if prompt := st.chat_input("What would you like to know about your renewable energy project?"):
+        st.session_state.project_messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            response = await pydantic_ai_expert.run(
+                prompt,
+                deps=deps
+            )
+            st.markdown(response)
+            st.session_state.project_messages.append({"role": "assistant", "content": response})
+
 # Title
 st.title("Project Dashboard 📊")
 st.markdown("Manage and track all your renewable energy projects in one place.")
@@ -381,27 +437,35 @@ else:
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    if 'governance_agent' not in st.session_state:
-                        st.session_state.governance_agent = GovernanceAgent(api_key=api_key)
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        if st.button("Get Building Department Info", key=f"dept_info_{idx}"):
-                            with st.spinner("Fetching department information..."):
-                                dept_info = st.session_state.governance_agent.get_building_department_info(project['location'])
-                                st.markdown("### 🏢 Building Department Information")
-                                st.markdown(dept_info['contact_info'])
-                    
-                    with col2:
-                        if st.button("Get Regulatory Requirements", key=f"reg_req_{idx}"):
-                            with st.spinner("Fetching regulatory requirements..."):
-                                reqs = st.session_state.governance_agent.get_regulatory_requirements(
-                                    project['location'],
-                                    project['type']
+                    if 'project_messages' not in st.session_state:
+                        st.session_state.project_messages = []
+
+                    # Display chat history
+                    for message in st.session_state.project_messages:
+                        with st.chat_message(message["role"]):
+                            st.write(message["content"])
+
+                    # Chat input
+                    if prompt := st.chat_input("Ask about governance, permits, or regulatory requirements"):
+                        st.session_state.project_messages.append({"role": "user", "content": prompt})
+                        with st.chat_message("user"):
+                            st.write(prompt)
+
+                        with st.chat_message("assistant"):
+                            with st.spinner("Processing your request..."):
+                                # Initialize OpenAI client
+                                openai_client = AsyncOpenAI(api_key=api_key)
+                                
+                                # Initialize dependencies
+                                deps = PydanticAIDeps(
+                                    supabase=supabase_client,
+                                    openai_client=openai_client
                                 )
-                                st.markdown("### 📋 Regulatory Requirements")
-                                st.markdown(reqs['requirements'])
+                                
+                                # Get response from expert agent
+                                response = run_async_response(prompt, deps)
+                                st.write(response)
+                                st.session_state.project_messages.append({"role": "assistant", "content": response})
 
 # Export All Projects functionality
 if st.session_state.projects:
