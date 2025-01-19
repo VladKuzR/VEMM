@@ -3,6 +3,7 @@ import openai
 from dotenv import load_dotenv
 import os
 from datetime import datetime
+import requests
 
 # Load environment variables
 load_dotenv()
@@ -92,20 +93,101 @@ def extract_esg_score(response):
     except:
         return None, None
 
+def get_fema_risks(lat, lon):
+    """Get comprehensive FEMA risk data for the location"""
+    if lat is None or lon is None:
+        return None, None
+    
+    # Get disaster declarations
+    disasters_url = "https://www.fema.gov/api/open/v1/DisasterDeclarationsSummaries"
+    disaster_params = {
+        "$filter": f"latitude gt {lat-1} and latitude lt {lat+1} and longitude gt {lon-1} and longitude lt {lon+1}",
+        "$orderby": "declarationDate desc",
+        "$top": 5
+    }
+    
+    # Get National Risk Index data
+    nri_url = "https://hazards.fema.gov/nri/public/api/data/county"
+    nri_params = {
+        "latitude": lat,
+        "longitude": lon
+    }
+    
+    try:
+        disasters_response = requests.get(disasters_url, params=disaster_params)
+        nri_response = requests.get(nri_url, params=nri_params)
+        
+        disasters = None
+        risk_data = None
+        
+        if disasters_response.status_code == 200:
+            disasters = disasters_response.json().get('DisasterDeclarationsSummaries', [])
+        
+        if nri_response.status_code == 200:
+            risk_data = nri_response.json()
+            
+        return disasters, risk_data
+    except Exception as e:
+        print(f"Error fetching FEMA data: {str(e)}")
+        return None, None
+
+def format_risk_context(disasters, risk_data):
+    """Format FEMA risk data into a readable context string"""
+    context = "\nFEMA Risk Analysis:\n"
+    
+    if disasters:
+        context += "\nRecent Disaster Declarations:\n"
+        for disaster in disasters:
+            context += f"- {disaster.get('declarationTitle')} ({disaster.get('declarationDate')})\n"
+    
+    if risk_data:
+        context += "\nNational Risk Index Data:\n"
+        try:
+            risk_factors = risk_data.get('riskFactors', {})
+            for risk_type, risk_info in risk_factors.items():
+                if isinstance(risk_info, dict):
+                    risk_score = risk_info.get('score', 'N/A')
+                    risk_rating = risk_info.get('rating', 'N/A')
+                    context += f"- {risk_type}: Score {risk_score} ({risk_rating})\n"
+            
+            # Add overall risk scores
+            overall = risk_data.get('overall', {})
+            context += "\nOverall Risk Metrics:\n"
+            context += f"- Risk Score: {overall.get('riskScore', 'N/A')}\n"
+            context += f"- Risk Rating: {overall.get('riskRating', 'N/A')}\n"
+            context += f"- Resilience Score: {overall.get('resilienceScore', 'N/A')}\n"
+            
+        except Exception as e:
+            context += f"Error parsing risk data: {str(e)}\n"
+    
+    return context
+
 # Generate analysis button
 if st.button("Generate Analysis"):
     if location and project_type and project_name:
+        # Get location coordinates and FEMA data
+        lat, lon = get_coordinates(location)
+        disasters, risk_data = get_fema_risks(lat, lon) if lat and lon else (None, None)
+        
+        # Format FEMA risk context
+        fema_context = format_risk_context(disasters, risk_data) if disasters or risk_data else ""
+        
         user_prompt = f"""
         Please provide a comprehensive analysis for a {project_type} project in {location}.
         Project Size: {project_size} MW
         Budget: ${project_budget} million
+        {fema_context}
         
         Please include:
         1. ESG Guidelines compliance analysis
         2. Community sentiment assessment
         3. Biodiversity impact analysis
         4. Sustainability recommendations
-        5. Potential challenges and solutions
+        5. Risk assessment and mitigation strategies:
+           - Natural disaster risks
+           - Environmental hazards
+           - Community resilience factors
+           - Infrastructure vulnerabilities
         
         End with an ESG score breakdown using the specified format.
         """
