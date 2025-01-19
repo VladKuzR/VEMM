@@ -21,6 +21,12 @@ openai.api_key = api_key
 if 'projects' not in st.session_state:
     st.session_state.projects = []
 
+# Add to your session state initialization
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
+if 'current_analysis' not in st.session_state:
+    st.session_state.current_analysis = None
+
 # Set page config
 st.set_page_config(
     page_title="Renewable Energy Project Consultant",
@@ -70,19 +76,50 @@ Governance: X/30
 Total Score: X/100
 [/ESG_SCORE]"""
 
+def stream_llm_response(response):
+    placeholder = st.empty()
+    full_response = ""
+    for chunk in response:
+        if chunk.choices[0].delta.content is not None:
+            full_response += chunk.choices[0].delta.content
+            placeholder.markdown(full_response + "▌")
+    placeholder.markdown(full_response)
+    return full_response
+
 # Function to get AI response
-def get_ai_response(user_input):
+def get_ai_response(user_input, is_followup=False):
     try:
+        messages = [
+            {"role": "system", "content": system_prompt},
+        ]
+        
+        # If it's a follow-up question, include previous context
+        if is_followup and st.session_state.messages:
+            messages.extend(st.session_state.messages)
+        
+        messages.append({"role": "user", "content": user_input})
+        
         response = openai.chat.completions.create(
             model="gpt-4",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_input}
-            ],
+            messages=messages,
             temperature=0.7,
-            max_tokens=1000
+            max_tokens=1500,
+            stream=True  # Enable streaming
         )
-        return response.choices[0].message.content
+        
+        full_response = stream_llm_response(response)
+        
+        # Store the interaction in session state
+        if not is_followup:
+            st.session_state.messages = messages + [
+                {"role": "assistant", "content": full_response}
+            ]
+        else:
+            st.session_state.messages.append(
+                {"role": "assistant", "content": full_response}
+            )
+            
+        return full_response
     except Exception as e:
         return f"An error occurred: {str(e)}"
 
@@ -207,6 +244,7 @@ if st.button("Generate Analysis"):
         
         with st.spinner("Generating analysis..."):
             response = get_ai_response(user_prompt)
+            st.session_state.current_analysis = response
             
             # Extract and display ESG score
             score, score_details = extract_esg_score(response)
@@ -234,14 +272,51 @@ if st.button("Generate Analysis"):
                     st.text(score_details)
             
             st.markdown("### Detailed Analysis")
-            # Remove the ESG score section from the main response
             cleaned_response = response.split("[ESG_SCORE]")[0]
             st.markdown(cleaned_response)
             
-            # Add a success message and navigation hint
-            st.success("Project analysis complete! View all your projects in the Project Dashboard.")
+            # Add a success message
+            st.success("Project analysis complete! You can ask follow-up questions below.")
     else:
         st.warning("Please enter a project name, location, and select a project type.")
+
+# Add follow-up interaction section
+if st.session_state.current_analysis:
+    st.markdown("---")
+    st.markdown("### Follow-up Questions")
+    st.markdown("Ask any questions about the analysis or request additional details.")
+    
+    # Text input for follow-up questions
+    follow_up = st.text_input("Your question:", key="follow_up")
+    
+    # Button to submit follow-up question
+    if st.button("Ask Question"):
+        if follow_up:
+            with st.spinner("Getting response..."):
+                # Create context-aware prompt
+                context_prompt = f"""
+                Regarding the previous analysis about the {project_type} project in {location},
+                please answer the following question:
+                {follow_up}
+                """
+                
+                follow_up_response = get_ai_response(context_prompt, is_followup=True)
+                
+                # Display the response in a new container
+                with st.container():
+                    st.markdown("#### Response:")
+                    st.markdown(follow_up_response)
+        else:
+            st.warning("Please enter a question.")
+
+    # Display conversation history
+    if st.session_state.messages:
+        st.markdown("### Conversation History")
+        for msg in st.session_state.messages[1:]:  # Skip the system prompt
+            if msg["role"] == "user":
+                st.markdown(f"**You:** {msg['content']}")
+            else:
+                st.markdown(f"**Assistant:** {msg['content']}")
 
 # Sidebar with additional information
 with st.sidebar:

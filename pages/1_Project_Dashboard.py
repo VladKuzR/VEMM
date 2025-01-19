@@ -5,6 +5,8 @@ import json
 import os
 import openai
 from dotenv import load_dotenv
+from Home import stream_llm_response
+
 
 # Load environment variables
 load_dotenv()
@@ -128,9 +130,10 @@ def get_social_media_strategy(project):
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=1500
+            max_tokens=1500,
+            stream=True  # Enable streaming
         )
-        return response.choices[0].message.content
+        return stream_llm_response(response)
     except Exception as e:
         return f"An error occurred: {str(e)}"
 
@@ -184,11 +187,45 @@ def get_environmental_strategy(project):
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=1500
+            max_tokens=1500,
+            stream=True  # Enable streaming
         )
-        return response.choices[0].message.content
+        return stream_llm_response(response)
     except Exception as e:
         return f"An error occurred: {str(e)}"
+
+def get_project_specific_response(project, question):
+    try:
+        prompt = f"""
+        Regarding the {project['type']} project named "{project['project_name']}" in {project['location']},
+        with a size of {project['size']} MW and budget of ${project['budget']}M,
+        please answer the following question:
+        {question}
+        """
+        
+        response = openai.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an expert consultant on renewable energy projects."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1000,
+            stream=True  # Enable streaming
+        )
+        return stream_llm_response(response)
+    except Exception as e:
+        return f"An error occurred: {str(e)}"
+
+def stream_llm_response(response):
+    placeholder = st.empty()
+    full_response = ""
+    for chunk in response:
+        if chunk.choices[0].delta.content is not None:
+            full_response += chunk.choices[0].delta.content
+            placeholder.markdown(full_response + "▌")
+    placeholder.markdown(full_response)
+    return full_response
 
 # Title
 st.title("Project Dashboard 📊")
@@ -320,6 +357,17 @@ else:
                             mime="text/csv",
                             key=f"export_{idx}"
                         )
+
+                    st.markdown("### Ask about this project")
+                    question = st.text_input("Your question:", key=f"q_{project['project_name']}")
+                    if st.button("Ask", key=f"btn_{project['project_name']}"):
+                        if question:
+                            with st.spinner("Getting response..."):
+                                response = get_project_specific_response(project, question)
+                                st.markdown("#### Response:")
+                                st.markdown(response)
+                        else:
+                            st.warning("Please enter a question.")
 
 # Export All Projects functionality
 if st.session_state.projects:
