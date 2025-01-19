@@ -9,6 +9,7 @@ class SocialMarketingAgent:
         """
         Initialize the Social Marketing Agent with necessary API keys
         """
+        self.openai_api_key = api_key  # Use the passed-in API key instead of hardcoding
         self.census_api_key = census_api_key
         self.demographic_data = None
         self.client = openai.Client(api_key=self.openai_api_key)
@@ -71,12 +72,12 @@ class SocialMarketingAgent:
         
         # Generate campaign strategy using OpenAI
         response = self.client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo-0125",
+            store=True,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": full_prompt}
-            ],
-            temperature=0.7
+            ]
         )
         
         return {
