@@ -68,6 +68,6 @@ Without meeting ESG (Environmental, Social, and Governance) requirements, renewa
 
 ## Try It Out
 
-[Link foк вуьщ](https://vamm.my-backend.site/)
+[Link foк the DEMO](https://vamm.my-backend.site/)
 
 Built with ❤️ by the Vamm.eco team
