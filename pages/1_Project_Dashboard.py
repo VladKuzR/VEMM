@@ -5,6 +5,20 @@ import json
 import os
 import openai
 from dotenv import load_dotenv
+from Home import stream_llm_response
+import sys
+from VAMM_governanceagent.create_agent import GovernanceAgent
+from VAMM_socialagent_master.create_agent import SocialMarketingAgent
+from VAMM_governanceagent.Expert_Agent import pydantic_ai_expert, PydanticAIDeps
+from openai import AsyncOpenAI
+from supabase import create_client, Client
+
+# Add the parent directory to the Python path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
+
+# Import using the folder name with underscores
+from VAMM_socialagent_master.create_agent import SocialMarketingAgent
 
 # Load environment variables
 load_dotenv()
@@ -16,6 +30,16 @@ if not api_key:
     st.stop()
 
 openai.api_key = api_key
+
+# Initialize Supabase client
+supabase_url = os.getenv('SUPABASE_URL')
+supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+
+if not supabase_url or not supabase_key:
+    st.error("Supabase credentials not found. Please check your .env file.")
+    st.stop()
+
+supabase_client = create_client(supabase_url, supabase_key)
 
 # Set page config
 st.set_page_config(
@@ -52,6 +76,8 @@ st.markdown("""
         border: 1px solid #e0e0e0;
         transition: all 0.3s ease;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        width: 100%;  /* Make card take full width */
+        box-sizing: border-box;  /* Include padding in width calculation */
     }
     .project-card:hover {
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
@@ -107,6 +133,37 @@ st.markdown("""
         border-radius: 4px;
         margin: 5px 0;
     }
+    .agent-box {
+        background-color: #f8f9fa;
+        border: 2px solid #e9ecef;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 15px 0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .agent-box h4 {
+        color: #1a73e8;
+        margin-bottom: 15px;
+    }
+    /* Make expander take full width */
+    .streamlit-expanderHeader {
+        width: 100%;
+        display: block;
+    }
+    
+    /* Style for the expander content */
+    .streamlit-expanderContent {
+        width: 100%;
+        box-sizing: border-box;
+    }
+    
+    /* Container for the expander */
+    div[data-testid="stExpander"] {
+        width: 100%;
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        margin-bottom: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -145,9 +202,10 @@ def get_social_media_strategy(project):
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=1500
+            max_tokens=1500,
+            stream=True  # Enable streaming
         )
-        return response.choices[0].message.content
+        return stream_llm_response(response)
     except Exception as e:
         return f"An error occurred: {str(e)}"
 
@@ -201,11 +259,88 @@ def get_environmental_strategy(project):
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=1500
+            max_tokens=1500,
+            stream=True  # Enable streaming
         )
-        return response.choices[0].message.content
+        return stream_llm_response(response)
     except Exception as e:
         return f"An error occurred: {str(e)}"
+
+def get_project_specific_response(project, question):
+    try:
+        prompt = f"""
+        Regarding the {project['type']} project named "{project['project_name']}" in {project['location']},
+        with a size of {project['size']} MW and budget of ${project['budget']}M,
+        please answer the following question:
+        {question}
+        """
+        
+        response = openai.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an expert consultant on renewable energy projects."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1000,
+            stream=True  # Enable streaming
+        )
+        return stream_llm_response(response)
+    except Exception as e:
+        return f"An error occurred: {str(e)}"
+
+def stream_llm_response(response):
+    placeholder = st.empty()
+    full_response = ""
+    for chunk in response:
+        if chunk.choices[0].delta.content is not None:
+            full_response += chunk.choices[0].delta.content
+            placeholder.markdown(full_response + "▌")
+    placeholder.markdown(full_response)
+    return full_response
+
+# Update the async helper functions
+async def get_expert_response(prompt, deps):
+    response = await pydantic_ai_expert.run(
+        prompt,
+        deps=deps
+    )
+    # Extract the data field from the response which contains the formatted text
+    return response.data if hasattr(response, 'data') else str(response)
+
+def run_async_response(prompt, deps):
+    import asyncio
+    return asyncio.run(get_expert_response(prompt, deps))
+
+async def handle_project_chat():
+    # Initialize OpenAI client
+    openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    
+    # Initialize dependencies
+    deps = PydanticAIDeps(
+        supabase=supabase_client,
+        openai_client=openai_client
+    )
+    
+    if "project_messages" not in st.session_state:
+        st.session_state.project_messages = []
+
+    for message in st.session_state.project_messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if prompt := st.chat_input("What would you like to know about your renewable energy project?"):
+        st.session_state.project_messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            response = await pydantic_ai_expert.run(
+                prompt,
+                deps=deps
+            )
+            st.markdown(response)
+            st.session_state.project_messages.append({"role": "assistant", "content": response})
 
 # Title
 st.title("Project Dashboard 📊")
@@ -234,109 +369,120 @@ st.header("Your Projects")
 if not st.session_state.projects:
     st.info("No projects added yet. Start by analyzing a project on the home page!")
 else:
-    # Create three columns for project cards
-    cols = st.columns(3)
-    
-    # Distribute projects across columns
+    # Use a single column layout for full width
     for idx, project in enumerate(st.session_state.projects):
-        with cols[idx % 3]:
-            # Create a card for each project
-            with st.container():
-                st.markdown(f"""
-                <div class="project-card">
-                    <h3>{project['project_name']}</h3>
-                    <p>{project['type']} in {project['location']}</p>
-                </div>
-                """, unsafe_allow_html=True)
+        # Create container for each project
+        with st.container():
+            # Project card header
+            st.markdown(f"""
+            <div class="project-card">
+                <h3>{project['project_name']}</h3>
+                <p>{project['type']} in {project['location']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Project details in expander
+            with st.expander("View Details"):
+                # Create tabs for different sections
+                overview_tab, social_tab, environmental_tab, governance_tab = st.tabs([
+                    "Overview", "Social", "Environmental", "Governance"
+                ])
                 
-                # Expandable section for project details
-                with st.expander("View Details"):
-                    # Project Overview
-                    st.subheader("Project Overview")
-                    st.markdown(f"""
-                    - **Location:** {project['location']}
-                    - **Type:** {project['type']}
-                    - **Size:** {project['size']} MW
-                    - **Budget:** ${project['budget']}M
-                    - **Date Added:** {project['date_added']}
-                    """)
-                    
-                    # ESG Score Visualization
-                    st.subheader("ESG Score")
-                    score_color = "green" if project['esg_score'] >= 70 else "orange" if project['esg_score'] >= 50 else "red"
-                    st.progress(project['esg_score']/100)
-                    st.markdown(f"""
-                    <div style='text-align: center; margin: 10px 0;'>
-                        <span class='score-badge' style='background-color: {score_color}; color: white;'>
-                            {int(project['esg_score'])}/100
-                        </span>
+                with overview_tab:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Size", f"{project['size']} MW")
+                        st.metric("Budget", f"${project['budget']}M")
+                    with col2:
+                        st.metric("ESG Score", project['esg_score'])
+                        st.metric("Location", project['location'])
+                
+                with social_tab:
+                    st.markdown("""
+                    <div class="agent-box">
+                        <h4>🤖 Social Media Impact Agent</h4>
+                        <p>Chat with your AI social media strategist to improve your project's social impact.</p>
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # Improvement Agents Section
-                    st.markdown("---")
-                    st.header("💡 Impact Improvement Agents")
+                    user_message = st.text_input("Ask your social media agent:", key=f"social_input_{idx}")
                     
-                    # Environmental Agent Tab
-                    env_tab, social_tab = st.tabs(["🌿 Environmental Agent", "🤝 Social Media Agent"])
-                    
-                    with env_tab:
-                        st.subheader("🌿 Environmental Impact Optimization")
-                        st.markdown("""
-                        Generate a comprehensive environmental strategy to improve your project's environmental score. 
-                        This will include ecosystem impact analysis, resource efficiency planning, and mitigation strategies.
-                        """)
-                        
-                        if st.button("Generate Environmental Strategy", key=f"env_strategy_{idx}"):
-                            with st.spinner("Analyzing environmental impact and generating recommendations..."):
-                                strategy = get_environmental_strategy(project)
-                                st.markdown("### 🌍 Environmental Improvement Strategy")
-                                st.markdown(strategy)
+                    if st.button("Send", key=f"social_send_{idx}"):
+                        if user_message:
+                            with st.spinner("Processing your request..."):
+                                # Get project context
+                                project_context = f"""
+                                Project: {project['project_name']}
+                                Type: {project['type']}
+                                Location: {project['location']}
+                                Size: {project['size']} MW
+                                Budget: ${project['budget']}M
+                                """
                                 
-                                # Add improvement potential note
-                                st.markdown("""
-                                <div class="eco-improvement-section">
-                                    <h4>🌱 Potential Environmental Score Improvement</h4>
-                                    <p>Implementing these environmental strategies could improve your environmental score by 8-15 points 
-                                    through enhanced ecosystem protection, resource efficiency, and carbon footprint reduction.</p>
-                                </div>
-                                """, unsafe_allow_html=True)
-                    
-                    with social_tab:
-                        st.subheader("🚀 Social Impact Improvement")
-                        if st.button("Generate Social Media Strategy", key=f"strategy_{idx}"):
-                            with st.spinner("Generating social media marketing strategy..."):
-                                strategy = get_social_media_strategy(project)
-                                st.markdown("### 📱 Social Media Marketing Strategy")
-                                st.markdown(strategy)
+                                # Get response from social agent
+                                response = st.session_state.social_agent.get_response(
+                                    user_message, 
+                                    context=project_context
+                                )
                                 
-                                # Add improvement potential note
-                                st.markdown("""
-                                <div class="improvement-section">
-                                    <h4>💡 Potential Social Score Improvement</h4>
-                                    <p>Implementing this social media strategy could improve your social impact score by 5-10 points 
-                                    through increased community engagement, transparency, and public support.</p>
-                                </div>
-                                """, unsafe_allow_html=True)
+                                # Display response
+                                st.markdown("### 🤖 Agent Response:")
+                                st.markdown(response)
+                        else:
+                            st.warning("Please enter a message for the agent.")
                     
-                    # Action Buttons
+                    # Add strategy generator
                     st.markdown("---")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button(f"Delete Project", key=f"delete_{idx}"):
-                            st.session_state.projects.remove(project)
-                            st.rerun()
-                    with col2:
-                        # Export individual project data
-                        project_df = pd.DataFrame([project])
-                        csv = project_df.to_csv(index=False)
-                        st.download_button(
-                            label="Export Data",
-                            data=csv,
-                            file_name=f"{project['project_name']}_data.csv",
-                            mime="text/csv",
-                            key=f"export_{idx}"
-                        )
+                    if st.button("Generate Full Social Media Strategy", key=f"strategy_{idx}"):
+                        with st.spinner("Generating social media marketing strategy..."):
+                            strategy = get_social_media_strategy(project)
+                            st.markdown("### 📱 Social Media Marketing Strategy")
+                            st.markdown(strategy)
+                
+                with environmental_tab:
+                    if st.button("Generate Environmental Strategy", key=f"env_strategy_{idx}"):
+                        with st.spinner("Generating environmental strategy..."):
+                            strategy = get_environmental_strategy(project)
+                            st.markdown("### 🌿 Environmental Strategy")
+                            st.markdown(strategy)
+                
+                with governance_tab:
+                    st.markdown("""
+                    <div class="agent-box">
+                        <h4>🏛️ Governance & Compliance Agent</h4>
+                        <p>Get information about building departments, permits, and regulatory requirements.</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if 'project_messages' not in st.session_state:
+                        st.session_state.project_messages = []
+
+                    # Display chat history
+                    for message in st.session_state.project_messages:
+                        with st.chat_message(message["role"]):
+                            st.write(message["content"])
+
+                    # Chat input
+                    if prompt := st.chat_input("Ask about governance, permits, or regulatory requirements"):
+                        st.session_state.project_messages.append({"role": "user", "content": prompt})
+                        with st.chat_message("user"):
+                            st.write(prompt)
+
+                        with st.chat_message("assistant"):
+                            with st.spinner("Processing your request..."):
+                                # Initialize OpenAI client
+                                openai_client = AsyncOpenAI(api_key=api_key)
+                                
+                                # Initialize dependencies
+                                deps = PydanticAIDeps(
+                                    supabase=supabase_client,
+                                    openai_client=openai_client
+                                )
+                                
+                                # Get response from expert agent
+                                response = run_async_response(prompt, deps)
+                                st.write(response)
+                                st.session_state.project_messages.append({"role": "assistant", "content": response})
 
 # Export All Projects functionality
 if st.session_state.projects:
