@@ -24,6 +24,23 @@ st.set_page_config(
     layout="wide"
 )
 
+# Add this after st.set_page_config()
+hotjar_tracking_code = """
+<!-- Hotjar Tracking Code for https://vamm.my-backend.site/ -->
+<script>
+    (function(h,o,t,j,a,r){
+        h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+        h._hjSettings={hjid:5277140,hjsv:6};
+        a=o.getElementsByTagName('head')[0];
+        r=o.createElement('script');r.async=1;
+        r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
+        a.appendChild(r);
+    })(window,document,'https://static.hotjar.com/c/hotjar-','.js?sv=');
+</script>
+"""
+
+st.components.v1.html(hotjar_tracking_code, height=0)
+
 # Custom CSS for cards and detailed view
 st.markdown("""
 <style>

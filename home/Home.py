@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime
 import requests
+from geopy.geocoders import Nominatim
 
 # Load environment variables
 load_dotenv()
@@ -26,6 +27,23 @@ st.set_page_config(
     page_icon="🌱",
     layout="wide"
 )
+
+# Add this after st.set_page_config()
+hotjar_tracking_code = """
+<!-- Hotjar Tracking Code for https://vamm.my-backend.site/ -->
+<script>
+    (function(h,o,t,j,a,r){
+        h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+        h._hjSettings={hjid:5277140,hjsv:6};
+        a=o.getElementsByTagName('head')[0];
+        r=o.createElement('script');r.async=1;
+        r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
+        a.appendChild(r);
+    })(window,document,'https://static.hotjar.com/c/hotjar-','.js?sv=');
+</script>
+"""
+
+st.components.v1.html(hotjar_tracking_code, height=0)
 
 # Title and description
 st.title("Renewable Energy Project Consultant 🌱")
@@ -161,6 +179,18 @@ def format_risk_context(disasters, risk_data):
             context += f"Error parsing risk data: {str(e)}\n"
     
     return context
+
+def get_coordinates(location):
+    """Convert location string to coordinates using Nominatim"""
+    try:
+        geolocator = Nominatim(user_agent="renewable_energy_consultant")
+        location_data = geolocator.geocode(location)
+        if location_data:
+            return location_data.latitude, location_data.longitude
+        return None, None
+    except Exception as e:
+        print(f"Error getting coordinates: {str(e)}")
+        return None, None
 
 # Generate analysis button
 if st.button("Generate Analysis"):
