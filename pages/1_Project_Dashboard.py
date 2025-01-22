@@ -12,6 +12,7 @@ from VAMM_socialagent_master.create_agent import SocialMarketingAgent
 from VAMM_governanceagent.Expert_Agent import pydantic_ai_expert, PydanticAIDeps
 from openai import AsyncOpenAI
 from supabase import create_client, Client
+import pathlib
 
 # Add the parent directory to the Python path
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,22 +49,20 @@ st.set_page_config(
     layout="wide"
 )
 
-# Add this after st.set_page_config()
-hotjar_tracking_code = """
-<!-- Hotjar Tracking Code for https://vamm.my-backend.site/ -->
-<script>
-    (function(h,o,t,j,a,r){
-        h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
-        h._hjSettings={hjid:5277140,hjsv:6};
-        a=o.getElementsByTagName('head')[0];
-        r=o.createElement('script');r.async=1;
-        r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
-        a.appendChild(r);
-    })(window,document,'https://static.hotjar.com/c/hotjar-','.js?sv=');
-</script>
-"""
+def inject_hotjar():
+    # Get the path to the hotjar.html file
+    current_dir = pathlib.Path(__file__).parent.parent.resolve()
+    hotjar_path = current_dir / "hotjar.html"
+    
+    # Read the HTML file
+    with open(hotjar_path) as f:
+        hotjar_html = f.read()
+        
+    # Inject the HTML with proper height and width
+    st.components.v1.html(hotjar_html, height=0, width=0)
 
-st.components.v1.html(hotjar_tracking_code, height=0)
+# Add this right after st.set_page_config()
+inject_hotjar()
 
 # Custom CSS for cards and detailed view
 st.markdown("""
